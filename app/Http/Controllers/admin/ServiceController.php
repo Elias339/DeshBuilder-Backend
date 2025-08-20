@@ -4,13 +4,10 @@ namespace App\Http\Controllers\admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Service;
-use App\Models\TempImage;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Intervention\Image\ImageManager;
-use Intervention\Image\Drivers\Gd\Driver;
+use Illuminate\Support\Facades\Storage;
 
 class ServiceController extends Controller
 {
@@ -20,20 +17,26 @@ class ServiceController extends Controller
         return response()->json([
            'status'=> true,
             'data'=>$services
-        ]);
+        ],200);
     }
 
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(),[
            'title'=>'required',
-           'slug'=>'required | unique:services,slug',
+           'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+           'slug' => 'required|unique:services,slug',
         ]);
         if ($validator->fails()){
             return response()->json([
                 'status'=>false,
                 'errors'=>$validator->errors()
-            ]);
+            ],422);
+        }
+
+        $imagePath = null;
+        if ($request->hasFile('image')) {
+            $imagePath = $request->file('image')->store('services', 'public');
         }
 
         $model = new Service();
@@ -42,42 +45,13 @@ class ServiceController extends Controller
         $model->short_desc = $request->short_desc;
         $model->text_content = $request->text_content;
         $model->status = $request->status;
+        $model->image = $imagePath;
         $model->save();
-
-        //save Temp image here
-        if ($request->imageId > 0) {
-            $tempImage = TempImage::find($request->imageId);
-            if ($tempImage != null){
-
-                $extArray = explode('.', $tempImage->name);
-                $ext = last($extArray);
-                $fileName = strtotime('now').$model->id.'.'.$ext;
-
-                // create small image here using intervention library
-                $sourcePath = public_path('uploads/temp/'.$tempImage->name);
-                $destPath = public_path('uploads/services/small/'.$fileName);
-                $manager = new ImageManager(Driver::class);
-                $image = $manager->read($sourcePath);
-
-                $image->coverDown(500, 600);
-                $image->save($destPath);
-
-                // create large image here using intervention library
-                $destPath = public_path('uploads/services/large/'.$fileName);
-                $manager = new ImageManager(Driver::class);
-                $image = $manager->read($sourcePath);
-                $image->scaleDown(1200);
-                $image->save($destPath);
-
-                $model->image = $fileName;
-                $model->save();
-            }
-        }
 
         return response()->json([
             'status'=>true,
             'message'=> "Service added successfully"
-        ]);
+        ],200);
     }
 
     public function show($id)
@@ -87,13 +61,13 @@ class ServiceController extends Controller
             return response()->json([
                 'status'=>false,
                 'message'=>'Service not found'
-            ]);
+            ],404);
         }
 
         return response()->json([
             'status'=>true,
             'data'=>$service
-        ]);
+        ],200);
     }
 
     public function edit(Service $service)
@@ -108,19 +82,28 @@ class ServiceController extends Controller
             return response()->json([
                 'status'=>false,
                 'message'=>'Service not found'
-            ]);
+            ],404);
         }
 
         $validator = Validator::make($request->all(),[
             'title'=>'required',
-            'slug'=>'required | unique:services,slug,'.$id.',id',
+            'slug'=>'required',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
         ]);
 
         if ($validator->fails()){
             return response()->json([
                 'status'=>false,
                 'errors'=>$validator->errors()
-            ]);
+            ],422);
+        }
+
+        $path = $service->image;
+        if ($request->hasFile('image')) {
+            if ($service->image && Storage::disk('public')->exists($service->image)) {
+                Storage::disk('public')->delete($service->image);
+            }
+            $path = $request->file('image')->store('services', 'public');
         }
 
         $service->title = $request->title;
@@ -128,48 +111,13 @@ class ServiceController extends Controller
         $service->short_desc = $request->short_desc;
         $service->text_content = $request->text_content;
         $service->status = $request->status;
+        $service->image = $path;
         $service->save();
-
-        //save Temp image here
-        if ($request->imageId > 0) {
-            $oldImage = $service->image;
-            $tempImage = TempImage::find($request->imageId);
-            if ($tempImage != null){
-
-                $extArray = explode('.', $tempImage->name);
-                $ext = last($extArray);
-                $fileName = strtotime('now').$service->id.'.'.$ext;
-
-                // create small image here using intervention library
-                $sourcePath = public_path('uploads/temp/'.$tempImage->name);
-                $destPath = public_path('uploads/services/small/'.$fileName);
-                $manager = new ImageManager(Driver::class);
-                $image = $manager->read($sourcePath);
-
-                $image->coverDown(500, 600);
-                $image->save($destPath);
-
-                // create large image here using intervention library
-                $destPath = public_path('uploads/services/large/'.$fileName);
-                $manager = new ImageManager(Driver::class);
-                $image = $manager->read($sourcePath);
-                $image->scaleDown(1200);
-                $image->save($destPath);
-
-                $service->image = $fileName;
-                $service->save();
-                if ($oldImage != ''){
-                    File::delete(public_path('uploads/services/small/'.$oldImage));
-                    File::delete(public_path('uploads/services/large/'.$oldImage));
-                }
-
-            }
-        }
 
         return response()->json([
             'status'=>true,
             'message'=> "Service updated successfully"
-        ]);
+        ],200);
     }
 
     public function destroy($id)
@@ -179,7 +127,11 @@ class ServiceController extends Controller
             return response()->json([
                 'status'=>false,
                 'message'=>'Service not found'
-            ]);
+            ],404);
+        }
+
+        if ($service->image && Storage::disk('public')->exists($service->image)) {
+            Storage::disk('public')->delete($service->image);
         }
 
         $service->delete();
@@ -187,7 +139,7 @@ class ServiceController extends Controller
         return response()->json([
             'status'=>true,
             'message'=>'Service delete successfully'
-        ]);
+        ],200);
     }
 }
 
